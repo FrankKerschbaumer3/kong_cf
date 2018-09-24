@@ -45,38 +45,20 @@ Parameters:
     Type: String
     MinLength: '8'
   DBClass:
-    Default: db.m4.large
+    Default: db.t2.micro
     Description: Database instance class
     Type: String
     AllowedValues:
     - db.t2.micro
     - db.t2.small
-    - db.t2.medium
-    - db.t2.large
-    - db.m4.large
-    - db.m4.xlarge
-    - db.m4.2xlarge
-    - db.m4.4xlarge
-    - db.m4.10xlarge
-    - db.r3.large
-    - db.r3.xlarge
-    - db.r3.2xlarge
-    - db.r3.4xlarge
-    - db.r3.8xlarge
-    - db.r4.large
-    - db.r4.xlarge
-    - db.r4.2xlarge
-    - db.r4.4xlarge
-    - db.r4.8xlarge
+    - db.t2.medium   
     ConstraintDescription: must select a valid database instance type.
   DBVersion:
     Description: Postgres version
     Type: String
-    Default: 9.6.8
+    Default: 10.4
     AllowedValues:
     - 10.4
-    - 9.6.8
-    - 9.5.12
   DBMultiAZ:
     Default: false
     Description: 'Allow MultiAZ database deployment '
@@ -147,7 +129,7 @@ Resources:
       - IpProtocol: tcp
         FromPort: '8443'
         ToPort: '8443'
-        CidrIp: !Ref 'KongProxyAccess'
+        CidrIp: 0.0.0.0/0
   DBSubnetGroup:
     Type: AWS::RDS::DBSubnetGroup
     Condition: CreateRDS
