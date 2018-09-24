@@ -1,0 +1,190 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Creates Postgres RDS instance in an existing VPC
+Parameters:
+  KongProxyAccess:
+    Description: The IP address range that can be used to access the Kong proxy
+    Type: String
+    MinLength: '9'
+    MaxLength: '18'
+    Default: 0.0.0.0/0
+    AllowedPattern: (\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})
+    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Required - Existing VPC Subnets where EC2 instances and RDS instances will run. (private)
+    Default: ''
+  DBHost:
+    Description: Optional - The database host dns, leave blank to start a new RDS instance
+    Type: String
+  DBPort:
+    Default: '5432'
+    Description: Conditional - required if DBHost provided. The database port
+    Type: String
+    AllowedPattern: '[0-9]+'
+    ConstraintDescription: must be a valid port number
+  DBName:
+    Default: kong
+    Description: Required - The database name
+    Type: String
+    MinLength: '1'
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
+    ConstraintDescription: must begin with a letter and contain only alphanumeric
+      characters.
+  DBUsername:
+    Default: kong
+    Description: Required - The database admin account username
+    Type: String
+    MinLength: '1'
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
+    ConstraintDescription: must begin with a letter and contain only alphanumeric
+      characters.
+  DBPassword:
+    Default: changeit
+    NoEcho: 'true'
+    Description: Required - The database admin account password
+    Type: String
+    MinLength: '8'
+  DBClass:
+    Default: db.m4.large
+    Description: Database instance class
+    Type: String
+    AllowedValues:
+    - db.t2.micro
+    - db.t2.small
+    - db.t2.medium
+    - db.t2.large
+    - db.m4.large
+    - db.m4.xlarge
+    - db.m4.2xlarge
+    - db.m4.4xlarge
+    - db.m4.10xlarge
+    - db.r3.large
+    - db.r3.xlarge
+    - db.r3.2xlarge
+    - db.r3.4xlarge
+    - db.r3.8xlarge
+    - db.r4.large
+    - db.r4.xlarge
+    - db.r4.2xlarge
+    - db.r4.4xlarge
+    - db.r4.8xlarge
+    ConstraintDescription: must select a valid database instance type.
+  DBVersion:
+    Description: Postgres version
+    Type: String
+    Default: 9.6.8
+    AllowedValues:
+    - 10.4
+    - 9.6.8
+    - 9.5.12
+  DBMultiAZ:
+    Default: false
+    Description: 'Allow MultiAZ database deployment '
+    Type: String
+    AllowedValues:
+    - true
+    - false
+  DBStorageType:
+    Description: Storage Type for RDS volume
+    Type: String
+    Default: gp2
+    AllowedValues:
+    - gp2
+    - standard
+  DBAllocatedStorage:
+    Default: '5'
+    Description: The size of the database (Gb)
+    Type: Number
+    MinValue: '5'
+    MaxValue: '6144'
+    ConstraintDescription: must be between 5+
+  DBStorageEncrypted:
+    Default: false
+    Description: Specifies whether the DB instance is encrypted
+    Type: String
+    AllowedValues:
+    - true
+    - false
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: Required - VPC Id of existing VPC
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+    - Label: 
+        default: "Kong Postgres Configuration"
+      Parameters:
+      - DBHost
+      - DBPort
+      - DBName
+      - DBUsername
+      - DBPassword
+      - DBClass
+      - DBVersion
+      - DBMultiAZ
+      - DBStorageType
+      - DBAllocatedStorage
+      - DBStorageEncrypted
+    - Label:
+        default: "Network Configuration"
+      Parameters:
+      - VpcId
+    ParameterLabels:
+      VpcId:
+        default: "Which VPC should this be deployed to?"
+
+Conditions:
+  CreateRDS: !Equals [!Ref 'DBHost', '']
+
+Resources:
+  KongSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable SSH access and HTTP access on the inbound port
+      VpcId: !Ref 'VpcId'
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: '8443'
+        ToPort: '8443'
+        CidrIp: !Ref 'KongProxyAccess'
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Condition: CreateRDS
+    Properties:
+      DBSubnetGroupDescription: Subnets available for the RDS DB Instance
+      SubnetIds: !Ref 'SubnetIds'
+  PostgresDB:
+    Type: AWS::RDS::DBInstance
+    Condition: CreateRDS
+    Properties:
+      Engine: postgres
+      DBName: !Ref 'DBName'
+      MasterUsername: !Ref 'DBUsername'
+      DBInstanceClass: !Ref 'DBClass'
+      AllocatedStorage: !Ref 'DBAllocatedStorage'
+      MasterUserPassword: !Ref 'DBPassword'
+      DBSubnetGroupName: !Ref 'DBSubnetGroup'
+      PubliclyAccessible: 'false'
+      EngineVersion: !Ref 'DBVersion'
+      MultiAZ: !Ref 'DBMultiAZ'
+      StorageEncrypted: !Ref 'DBStorageEncrypted'
+      StorageType: !Ref 'DBStorageType'
+      VPCSecurityGroups:
+      - !Ref 'DBSecurityGroup'
+  DBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Condition: CreateRDS
+    Properties:
+      GroupDescription: Database security groups
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 5432
+        ToPort: '5432'
+        SourceSecurityGroupId: !Ref 'KongSecurityGroup'
+      SecurityGroupEgress:
+      - IpProtocol: tcp
+        FromPort: '1'
+        ToPort: '65535'
+        CidrIp: 0.0.0.0/0
+      VpcId: !Ref 'VpcId'
