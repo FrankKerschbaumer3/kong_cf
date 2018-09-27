@@ -1,10 +1,10 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: Kong CloudFormation template. Creates load balanced Kong instances (cluster)
-  with Postgres RDS instance in an existing VPC
+  using existing Postgres RDS instance in an existing VPC.
 Parameters:
   # Kong Instance Config
   KongVersion:
-    Description: Kong version (Only 0.11.x and above supported)
+    Description: Kong Version
     Type: String
     Default: 0.14.1
     AllowedValues:
@@ -17,32 +17,15 @@ Parameters:
   KongInstanceType:
     Description: 'Kong EC2 instance type'
     Type: String
-    Default: c4.large
+    Default: t2.small
     AllowedValues:
     - t2.small
     - t2.micro
     - t2.medium
-    - t2.large
-    - m4.large
-    - m4.xlarge
-    - m4.2xlarge
-    - m4.4xlarge
-    - m4.10xlarge
-    - c4.large
-    - c4.xlarge
-    - c4.xlarge
-    - c4.2xlarge
-    - c4.4xlarge
-    - c4.8xlarge
-    - r3.large
-    - r3.xlarge
-    - r3.2xlarge
-    - r3.4xlarge
-    - r3.8xlarge
     ConstraintDescription: must be a valid EC2 instance type.
   SubnetIds:
     Type: List<AWS::EC2::Subnet::Id>
-    Description: Required - Existing VPC Subnets where EC2 instances and RDS instances will run. (private)
+    Description: Required - Existing Private VPC Subnets where RDS instance(s) are running.
     Default: ''
   SecurityGroupForSSH:
     Description: Optional - Security group which is allowed SSH access to Kong instances
@@ -57,22 +40,27 @@ Parameters:
   KongFleetMaxSize:
     Description: Max Number of Kong instances
     Type: Number
-    Default: '3'
+    Default: '1'
     MinValue: '1'
   KongFleetDesiredSize:
     Description: Desired Number of Kong instances
     Type: Number
-    Default: '2'
+    Default: '1'
     MinValue: '0'
   HardDriveSize:
     Description: The root volume size in GB for Kong nodes (volume type=gp2)
     Type: Number
-    Default: '40'
+    Default: '20'
     MinValue: '20'
 
   # Kong Database Config
+  #This information should be pulled in while running the script
+  #It will pull the relevant outputs from the RDS instance created in the script. 
   DBHost:
-    Description: Optional - The database host dns, leave blank to start a new RDS instance
+    #Would like to possibly pull endpoint address here
+    #{"Fn::GetAtt": ["MyDB","Endpoint.Address"]}
+    #{"Fn::GetAtt": ["MyDB","Endpoint.Port"]}
+    Description: Optional - The database host dns
     Type: String
   DBPort:
     Default: '5432'
@@ -99,38 +87,22 @@ Parameters:
   DBPassword:
     Default: changeit
     NoEcho: 'true'
-    Description: Required - The database admin account password
+    Description: Required - Must be Password used when creating the RDS instance. Must be longer than 8 characters.
     Type: String
     MinLength: '8'
   DBClass:
-    Default: db.m4.large
+    Default: db.t2.micro
     Description: Database instance class
     Type: String
     AllowedValues:
     - db.t2.micro
     - db.t2.small
     - db.t2.medium
-    - db.t2.large
-    - db.m4.large
-    - db.m4.xlarge
-    - db.m4.2xlarge
-    - db.m4.4xlarge
-    - db.m4.10xlarge
-    - db.r3.large
-    - db.r3.xlarge
-    - db.r3.2xlarge
-    - db.r3.4xlarge
-    - db.r3.8xlarge
-    - db.r4.large
-    - db.r4.xlarge
-    - db.r4.2xlarge
-    - db.r4.4xlarge
-    - db.r4.8xlarge
     ConstraintDescription: must select a valid database instance type.
   DBVersion:
     Description: Postgres version
     Type: String
-    Default: 9.6.8
+    Default: 10.4
     AllowedValues:
     - 10.4
     - 9.6.8
@@ -148,7 +120,6 @@ Parameters:
     Default: gp2
     AllowedValues:
     - gp2
-    - standard
   DBAllocatedStorage:
     Default: '5'
     Description: The size of the database (Gb)
@@ -185,7 +156,7 @@ Parameters:
     AllowedPattern: (\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})
     ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.
   KongAdminAccessEnabled:
-    Default: 'no'
+    Default: 'yes'
     Description: Allow public access to Kong Admin
     Type: String
     AllowedValues:
@@ -194,7 +165,7 @@ Parameters:
   KongAdminPort:
     Description: The port at which to expose the Kong Admin dashboard
     Type: String
-    Default: '8080'
+    Default: '8001'
     MinLength: '2'
     MaxLength: '6'
     AllowedPattern: (\d{2,6})
@@ -216,13 +187,6 @@ Parameters:
     AllowedPattern: (\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})
     ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.
   # Alarms Configuration
-  KinesisStackName:
-    Type: String
-    Description: Optional - Name of the CF stack used to create the Kinesis stream. Leave blank to skip filter creation.
-  CloudFormationLogGroup:
-    Description: Name of CloudFormation log group. All cloud-init based logs will be sent here
-    Type: String
-    Default: 'CloudFormation'
   VpcId:
     Type: AWS::EC2::VPC::Id
     Description: Required - VPC Id of existing VPC
@@ -272,13 +236,6 @@ Metadata:
       - KongAdminPort
       - KongAdminAccess
       - KongAdminAccessSecondary
-    - Label:
-        default: "Logging"
-      Parameters:
-      - KinesisStackName
-      - CloudFormationLogGroup
-    - Label:
-        default: "Network Configuration"
       Parameters:
       - VpcId
 
@@ -287,7 +244,7 @@ Metadata:
         default: "Which VPC should this be deployed to?"
       KongAdminAccessEnabled:
         default: "Enable public access to Kong Admin port?"
-
+#Not sure about the AMI's?        
 Mappings:
   RegionKongAmiMap:
     ca-central-1:
@@ -303,28 +260,10 @@ Conditions:
   CreateSecondaryAdminIngress: !And
   - !Not [!Equals [!Ref 'KongAdminAccessSecondary', '0.0.0.0/0']]
   - !Condition CreateAdminIngress
-  CreateSubscriptionFilter: !Not [!Equals [!Ref 'KinesisStackName', '']]
   AllowSSHAccess: !Not [!Equals [!Ref 'SecurityGroupForSSH', '']]
   PerformMigration: !Equals [!Ref RunMigration, 'yes']
 
 Resources:
-  LogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      RetentionInDays: 14
-      LogGroupName: !Ref 'AWS::StackName'
-  SubscriptionFilter:
-    Type: AWS::Logs::SubscriptionFilter
-    Condition: CreateSubscriptionFilter
-    DependsOn:
-    - LogGroup
-    Properties:
-      RoleArn: !ImportValue
-        Fn::Sub: ${KinesisStackName}-Role-Arn
-      LogGroupName: !Ref 'LogGroup'
-      FilterPattern: ''
-      DestinationArn: !ImportValue
-        Fn::Sub: ${KinesisStackName}-Stream-Arn
   KongRole:
     Type: AWS::IAM::Role
     Properties:
@@ -339,18 +278,6 @@ Resources:
           - sts:AssumeRole
       Path: /
       Policies:
-      - PolicyName: root
-        PolicyDocument:
-          Version: '2012-10-17'
-          Statement:
-          - Effect: Allow
-            Action:
-            - logs:CreateLogGroup
-            - logs:CreateLogStream
-            - logs:PutLogEvents
-            - logs:DescribeLogStreams
-            Resource:
-            - arn:aws:logs:*:*:*
       - PolicyName: ec2-operations
         PolicyDocument:
           Version: '2012-10-17'
@@ -358,9 +285,6 @@ Resources:
           - Effect: Allow
             Action:
             - ec2:DescribeTags
-            - cloudwatch:PutMetricData
-            - cloudwatch:GetMetricStatistics
-            - cloudwatch:ListMetrics
             Resource: '*'
   KongInstanceProfile:
     Type: AWS::IAM::InstanceProfile
@@ -509,9 +433,7 @@ Resources:
         configSets:
           full_install:
           - install_cfn_hooks
-          - install_logging
           - install_kong
-          - install_monitoring
         install_cfn_hooks:
           files:
             "/etc/cfn/cfn-hup.conf":
@@ -536,223 +458,6 @@ Resources:
                 files:
                 - /etc/cfn/cfn-hup.conf
                 - /etc/cfn/hooks.d/cfn-auto-reloader.conf
-        install_monitoring:
-          commands:
-            01_install_disk_mem_monitoring:
-              command: |
-                #!/bin/bash
-                yum install perl-Switch perl-DateTime perl-Sys-Syslog perl-LWP-Protocol-https -y
-                version=1.2.1
-                archive=CloudWatchMonitoringScripts-$version.zip
-                mon_dir=/opt/monitoring
-                mkdir -p $mon_dir
-                cd $mon_dir
-                curl http://aws-cloudwatch.s3.amazonaws.com/downloads/$archive -O
-                unzip $archive
-                rm $archive
-          files:
-            "/etc/cron.d/metrics":
-              content: !Sub |
-                # Version: 1.1.2-rpm
-                PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-                * * * * * root /opt/monitoring/aws-scripts-mon/mon-put-instance-data.pl --mem-used-incl-cache-buff --mem-util --disk-space-util --disk-path=/ --auto-scaling --from-cron
-              mode: '000644'
-              owner: root
-              group: root
-
-        install_logging:
-          # Set up AWS logging for Kong and log any cloud formation events to the CloudFormation log group
-          # Set up log rotation for syslog related log files and nginx access logs
-          # Tweak syslog max message limits to prevent truncation of large log messages
-          packages:
-            yum :
-              awslogs: []
-          files:
-            "/etc/awslogs/awslogs.conf":
-              mode: '000444'
-              owner: root
-              group: root
-              content: !Sub |
-                [general]
-                state_file = /var/awslogs/state/agent-state
-                use_gzip_http_content_encoding = true
-                [kong-admin-acc-log]
-                file = /usr/local/kong/logs/admin_access.log
-                log_group_name = ${AWS::StackName}
-                log_stream_name = {instance_id}/admin_access.log
-                datetime_format = %Y-%m-%dT%H:%M:%SZ
-                [kong-acc-log]
-                file = /usr/local/kong/logs/access.log
-                log_group_name = ${AWS::StackName}
-                log_stream_name = {instance_id}/access.log
-                datetime_format = %Y-%m-%dT%H:%M:%SZ
-                [kong-error-log]
-                file = /usr/local/kong/logs/error.log
-                log_group_name = ${AWS::StackName}
-                log_stream_name = {instance_id}/error.log
-                datetime_format = %Y-%m-%dT%H:%M:%SZ
-                [kong-service-log]
-                file = /var/log/kong.log
-                log_group_name = ${AWS::StackName}
-                log_stream_name = {instance_id}/kong.log
-                datetime_format =
-                [syslog]
-                file = /var/log/messages
-                log_group_name = ${AWS::StackName}
-                log_stream_name = {instance_id}/syslog
-                datetime_format =
-                [/var/log/cloud-init.log]
-                file = /var/log/cloud-init.log
-                log_group_name = ${CloudFormationLogGroup}
-                log_stream_name = {instance_id}/cloud-init.log
-                datetime_format =
-                [/var/log/cloud-init-output.log]
-                file = /var/log/cloud-init-output.log
-                log_group_name = ${CloudFormationLogGroup}
-                log_stream_name = {instance_id}/cloud-init-output.log
-                datetime_format =
-                [/var/log/cfn-init.log]
-                file = /var/log/cfn-init.log
-                log_group_name = ${CloudFormationLogGroup}
-                log_stream_name = {instance_id}/cfn-init.log
-                datetime_format =
-                [/var/log/cfn-init-cmd.log]
-                file = /var/log/cfn-init-cmd.log
-                log_group_name = ${CloudFormationLogGroup}
-                log_stream_name = {instance_id}/cfn-init-cmd.log
-                datetime_format =
-                [/var/log/cfn-hup.log]
-                file = /var/log/cfn-hup.log
-                log_group_name = ${CloudFormationLogGroup}
-                log_stream_name = {instance_id}/cfn-hup.log
-                datetime_format =
-                [/var/log/cfn-wire.log]
-                file = /var/log/cfn-wire.log
-                log_group_name = ${CloudFormationLogGroup}
-                log_stream_name = {instance_id}/cfn-wire.log
-                datetime_format =
-            "/etc/awslogs/awscli.conf":
-              mode: '000444'
-              owner: root
-              group: root
-              content: !Sub |
-                [plugins]
-                cwlogs = cwlogs
-                [default]
-                region = ${AWS::Region}
-            "/etc/cron.hourly/logrotate":
-              mode: '000755'
-              owner: root
-              group: root
-              content: |
-                #!/bin/sh
-                /usr/sbin/logrotate /etc/logrotate.conf >/dev/null 2>&1
-                EXITVALUE=$?
-                if [ $EXITVALUE != 0 ]; then
-                    /usr/bin/logger -t logrotate "ALERT exited abnormally with [$EXITVALUE]"
-                fi
-                exit 0
-            "/etc/logrotate.d/syslog":
-              mode: '000644'
-              owner: root
-              group: root
-              content: !Sub |
-                /var/log/cron
-                /var/log/maillog
-                /var/log/messages
-                /var/log/secure
-                /var/log/spooler
-                {
-                    missingok
-                    notifempty
-                    size 500M
-                    create 0600 root root
-                    compress
-                    rotate 1
-                    sharedscripts
-                    postrotate
-                    /bin/kill -HUP `cat /var/run/syslogd.pid 2> /dev/null` 2> /dev/null || true
-                    endscript
-                }
-            "/etc/logrotate.d/kong":
-              mode: '000644'
-              owner: root
-              group: root
-              content: |
-                # Version: 1.1.2-rpm
-                /usr/local/kong/logs/access.log
-                /usr/local/kong/logs/admin_access.log
-                /usr/local/kong/logs/error.log
-                {
-                    missingok
-                    notifempty
-                    size 500M
-                    create 0600 root root
-                    compress
-                    rotate 1
-                    postrotate
-                            [ ! -f /usr/local/kong/pids/nginx.pid ] || kill -USR1 `cat /usr/local/kong/pids/nginx.pid`
-                    endscript
-                }
-            "/etc/logrotate.d/awslogs":
-              mode: '000644'
-              owner: root
-              group: root
-              content: |
-                # Version: 1.1.2-rpm
-                /var/log/awslogs.log {
-                    missingok
-                    notifempty
-                    size 100M
-                    create 0600 root root
-                    compress
-                    rotate 2
-                    postrotate
-                	service awslogs condrestart
-                    endscript
-                }
-          commands:
-            01_create_state_directory:
-              command: |
-                #!/bin/bash
-                mkdir -p /var/awslogs/state
-                touch /usr/local/kong/logs/error.log
-                touch /usr/local/kong/logs/admin-access.log
-                touch /usr/local/kong/logs/access.log
-                touch /var/log/kong.log
-            02_tweak_syslog_message_limit:
-              command: |
-                #!/bin/bash
-                # Prepend the lines to /etc/rsyslog.conf
-                echo '# increase maximum allowed log message length to prevent truncation of large messages' > /tmp/rsyslog-temp-file
-                echo '# see http://www.rsyslog.com/doc/v8-stable/configuration/global/index.html for more information' >>  /tmp/rsyslog-temp-file
-                echo '$MaxMessageSize 64k' >> /tmp/rsyslog-temp-file
-                echo '' >> /tmp/rsyslog-temp-file
-                cat /etc/rsyslog.conf >> /tmp/rsyslog-temp-file
-                cp /tmp/rsyslog-temp-file /etc/rsyslog.conf
-                # Note: since we use commands to prepend the changes to /etc/rsyslog.conf, CF cannot
-                # detect this properly via services: sysvinit: rsyslog: ...
-                # so we invoke a restart manually
-                service rsyslog restart
-            03_logrotate_hourly:
-              command: |
-                #!/bin/bash
-                # Remove logrotate cron from running daily since we set it to run hourly above
-                if [ -f "/etc/cron.daily/logrotate" ]; then
-                  rm /etc/cron.daily/logrotate
-                fi
-            04_logrotate_conf:
-              command: |
-                #!/bin/bash
-                # stop suffixing date at end of files
-                sed -i 's/^dateext/#dateext/' /etc/logrotate.conf
-          services:
-            sysvinit:
-              awslogs:
-                enabled: 'true'
-                ensureRunning: 'true'
-                files:
-                - /etc/awslogs/awslogs.conf
         install_kong:
           packages:
             yum:
