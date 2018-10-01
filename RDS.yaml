@@ -112,7 +112,7 @@ Conditions:
   CreateRDS: !Equals [!Ref 'DBHost', '']
 
 Resources:
-  KongSecurityGroup:
+  RDSSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupDescription: Enable SSH access and HTTP access on the inbound port
@@ -155,13 +155,26 @@ Resources:
       - IpProtocol: tcp
         FromPort: 5432
         ToPort: '5432'
-        SourceSecurityGroupId: !Ref 'KongSecurityGroup'
+        SourceSecurityGroupId: !Ref 'RDSSecurityGroup'
       SecurityGroupEgress:
       - IpProtocol: tcp
         FromPort: '1'
         ToPort: '65535'
         CidrIp: 0.0.0.0/0
       VpcId: !Ref 'VpcId'
-#Outputs:
-#  RDSEndpoint:
-#  RDSPort:
+
+Outputs:
+  PGEndpoint:
+    Description: Database Hostname
+    Value: !GetAtt PostgresDB.Endpoint.Address
+  PGPort:
+    Description: Database Port
+    Value: !GetAtt PostgresDB.Endpoint.Port
+  PGUsername:
+    Description:
+    Value: !Ref 'DBUsername'
+  KongVPC:
+    Description:
+    Value: !Ref 'VpcId'
+  
+  
